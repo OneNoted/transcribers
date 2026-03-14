@@ -36,6 +36,8 @@
             cuda_nvcc
             libcublas
             cuda_cccl
+            cuda_nvrtc
+            libcurand
           ];
 
           # bindgen_cuda expects a traditional /usr/local/cuda-style layout
