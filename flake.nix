@@ -13,16 +13,14 @@
 
   outputs = { self, nixpkgs, crane, rust-overlay, flake-utils, ... }:
     let
-      # Systems that make sense for this project
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
-
       forAllSystems = f: nixpkgs.lib.genAttrs supportedSystems f;
 
-      # Build package for a given system with optional CUDA
       mkTranscribers = { system, withCuda ? false }:
         let
           pkgs = import nixpkgs {
             inherit system;
+            overlays = [ rust-overlay.overlays.default ];
             config.allowUnfree = withCuda;
             config.cudaSupport = withCuda;
           };
@@ -32,21 +30,6 @@
           );
 
           src = craneLib.cleanCargoSource ./.;
-
-          # whisper-rs-sys needs these to find/build whisper.cpp
-          whisperBuildInputs = with pkgs; [ cmake clang ]
-            ++ pkgs.lib.optionals withCuda (with pkgs.cudaPackages; [
-              cuda_cudart
-              cuda_nvcc
-              libcublas
-              cuda_cccl
-            ]);
-
-          # candle CUDA needs cuBLAS at link time
-          candleBuildInputs = pkgs.lib.optionals withCuda (with pkgs.cudaPackages; [
-            libcublas
-            cuda_cudart
-          ]);
 
           commonArgs = {
             inherit src;
@@ -61,14 +44,17 @@
 
             buildInputs = with pkgs; [
               openssl
-            ] ++ whisperBuildInputs ++ candleBuildInputs;
+            ] ++ pkgs.lib.optionals withCuda (with pkgs.cudaPackages; [
+              cuda_cudart
+              cuda_nvcc
+              libcublas
+              cuda_cccl
+            ]);
 
-            # Feature flags
             cargoExtraArgs = if withCuda
               then "--features cuda"
               else "";
 
-            # Environment for whisper-rs-sys CUDA build
             env = pkgs.lib.optionalAttrs withCuda {
               WHISPER_CUBLAS = "1";
               CUDA_COMPUTE_CAP = "89";
@@ -79,6 +65,7 @@
 
         in craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
+          meta.mainProgram = "transcribers";
         });
     in
     {
@@ -92,6 +79,7 @@
         let
           pkgs = import nixpkgs {
             inherit system;
+            overlays = [ rust-overlay.overlays.default ];
             config.allowUnfree = true;
           };
 
