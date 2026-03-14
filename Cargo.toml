@@ -14,6 +14,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "fs"
 tower-http = { version = "0.6", features = ["cors"] }
 
 # TTS engine (Qwen3-TTS via Candle)
+# NOTE: speakers 0.2 is not yet published; using path deps for development.
+# Update to crates.io versions once speakers 0.2 is released.
 qwen3-tts = { package = "speakers-qwen3-tts", path = "../speake-rs/crates/speakers-qwen3-tts", features = ["hub"] }
 speakers-core = { path = "../speake-rs/crates/speakers-core" }
 candle-core = "0.9"
