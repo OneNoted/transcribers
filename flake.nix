@@ -62,7 +62,9 @@
               then "--features cuda"
               else "";
 
-            env = pkgs.lib.optionalAttrs withCuda {
+            env = {
+              LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            } // pkgs.lib.optionalAttrs withCuda {
               WHISPER_CUBLAS = "1";
               CUDA_COMPUTE_CAP = "89";
               CUDA_ROOT = "${cudaJoined}";
