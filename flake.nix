@@ -36,7 +36,6 @@
             cuda_nvcc
             libcublas
             cuda_cccl
-            cuda_cudart.static
           ];
 
           commonArgs = {
