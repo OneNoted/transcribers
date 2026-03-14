@@ -12,7 +12,7 @@
   # Enable transcribers — replaces speake-rs + tts-service
   services.transcribers = {
     enable = true;
-    listen = "0.0.0.0:9100";
+    listen = "0.0.0.0:9200";
 
     stt = {
       modelPath = "/var/lib/transcribers/models/ggml-large-v3-turbo.bin";

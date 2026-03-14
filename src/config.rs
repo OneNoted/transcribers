@@ -47,7 +47,7 @@ impl Default for Config {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            listen: "0.0.0.0:9100".to_string(),
+            listen: "0.0.0.0:9200".to_string(),
         }
     }
 }

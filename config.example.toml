@@ -1,5 +1,5 @@
 [server]
-listen = "0.0.0.0:9100"
+listen = "0.0.0.0:9200"
 
 [stt]
 model_path = "/models/ggml-large-v3-turbo.bin"

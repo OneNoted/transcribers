@@ -34,7 +34,7 @@ in
 
     listen = lib.mkOption {
       type = lib.types.str;
-      default = "0.0.0.0:9100";
+      default = "0.0.0.0:9200";
       description = "Address and port to listen on.";
     };
 
