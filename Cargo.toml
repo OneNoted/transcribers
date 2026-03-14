@@ -1,0 +1,51 @@
+[package]
+name = "transcribers"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Unified STT + TTS HTTP server"
+license = "MIT"
+
+[dependencies]
+# HTTP framework
+axum = "0.8"
+axum-extra = { version = "0.10", features = ["multipart"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "fs", "io-util", "net", "sync"] }
+tower-http = { version = "0.6", features = ["cors"] }
+
+# TTS engine (Qwen3-TTS via Candle)
+qwen3-tts = { package = "speakers-qwen3-tts", path = "../speake-rs/crates/speakers-qwen3-tts", features = ["hub"] }
+speakers-core = { path = "../speake-rs/crates/speakers-core" }
+candle-core = "0.9"
+
+# STT engine (whisper.cpp bindings)
+whisper-rs = "0.15"
+
+# Audio decoding for file uploads
+rodio = { version = "0.21", default-features = false, features = ["wav", "mp3", "flac", "vorbis", "mp4"] }
+hound = "3.5"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+[features]
+default = []
+cuda = ["whisper-rs/cuda", "qwen3-tts/cuda"]
+flash-attn = ["cuda", "qwen3-tts/flash-attn"]
+
+[[bin]]
+name = "transcribers"
+path = "src/main.rs"

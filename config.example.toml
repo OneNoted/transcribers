@@ -1,0 +1,14 @@
+[server]
+listen = "0.0.0.0:9100"
+
+[stt]
+model_path = "/models/ggml-large-v3-turbo.bin"
+language = "auto"
+use_gpu = true
+flash_attn = true
+
+[tts]
+model = "custom-voice"
+# voices_dir = "/data/voices"
+default_voice = "ryan"
+synthesis_timeout_ms = 90000
