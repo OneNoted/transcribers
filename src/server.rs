@@ -1,8 +1,8 @@
-use std::sync::mpsc;
 use std::time::Instant;
 
 use axum::Router;
 use axum::routing::{get, post};
+use tokio::sync::mpsc;
 use tower_http::cors::CorsLayer;
 
 use crate::config::Config;
@@ -14,8 +14,8 @@ use crate::tts::routes::TtsJob;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub stt_tx: mpsc::SyncSender<SttJob>,
-    pub tts_tx: mpsc::SyncSender<TtsJob>,
+    pub stt_tx: mpsc::Sender<SttJob>,
+    pub tts_tx: mpsc::Sender<TtsJob>,
     pub stt_model: String,
     pub tts_model: String,
     pub default_voice: String,
@@ -35,11 +35,27 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
 
     let tts_model = format!("qwen3-tts-{}", config.tts.model);
 
-    tracing::info!("initializing STT engine...");
-    let stt_tx = stt::spawn_worker(&config.stt)?;
+    // Load both models in parallel since they are independent
+    let stt_config = config.stt.clone();
+    let tts_config = config.tts.clone();
 
-    tracing::info!("initializing TTS engine...");
-    let tts_tx = tts::spawn_worker(&config.tts)?;
+    let (stt_result, tts_result) = tokio::task::spawn_blocking(move || {
+        std::thread::scope(|s| {
+            let stt_handle = s.spawn(|| {
+                tracing::info!("initializing STT engine...");
+                stt::spawn_worker(&stt_config)
+            });
+            let tts_handle = s.spawn(|| {
+                tracing::info!("initializing TTS engine...");
+                tts::spawn_worker(&tts_config)
+            });
+            (stt_handle.join(), tts_handle.join())
+        })
+    })
+    .await?;
+
+    let stt_tx = stt_result.map_err(|_| anyhow::anyhow!("STT init panicked"))??;
+    let tts_tx = tts_result.map_err(|_| anyhow::anyhow!("TTS init panicked"))??;
 
     let state = AppState {
         stt_tx,

@@ -1,4 +1,4 @@
-use std::io::BufReader;
+use std::io::{BufReader, Read, Seek};
 use std::path::Path;
 
 use rodio::Decoder;
@@ -15,24 +15,20 @@ const NORMALIZE_TARGET_PEAK: f32 = 0.85;
 const NORMALIZE_MAX_GAIN: f32 = 2.5;
 const NORMALIZE_MIN_PEAK: f32 = 0.005;
 
-/// Decode an audio file to mono 16 kHz f32 samples suitable for Whisper.
-pub fn decode_audio_file(path: &Path) -> anyhow::Result<Vec<f32>> {
-    let file = std::fs::File::open(path)?;
-    let reader = BufReader::new(file);
+/// Decode an audio source to mono 16 kHz f32 samples suitable for Whisper.
+fn decode_audio<R: Read + Seek + Send + Sync + 'static>(
+    reader: R,
+    label: &str,
+) -> anyhow::Result<Vec<f32>> {
     let decoder = Decoder::new(reader)?;
 
-    let resampled = UniformSourceIterator::<Decoder<BufReader<std::fs::File>>>::new(
-        decoder,
-        1,
-        TARGET_SAMPLE_RATE,
-    );
+    let resampled = UniformSourceIterator::<Decoder<R>>::new(decoder, 1, TARGET_SAMPLE_RATE);
 
     let samples: Vec<f32> = resampled.collect();
-    anyhow::ensure!(!samples.is_empty(), "no audio samples decoded from {}", path.display());
+    anyhow::ensure!(!samples.is_empty(), "no audio samples decoded from {label}");
 
     tracing::info!(
-        "decoded {}: {:.1}s, {} samples",
-        path.display(),
+        "decoded {label}: {:.1}s, {} samples",
         samples.len() as f64 / TARGET_SAMPLE_RATE as f64,
         samples.len()
     );
@@ -40,27 +36,16 @@ pub fn decode_audio_file(path: &Path) -> anyhow::Result<Vec<f32>> {
     Ok(samples)
 }
 
+/// Decode an audio file to mono 16 kHz f32 samples.
+pub fn decode_audio_file(path: &Path) -> anyhow::Result<Vec<f32>> {
+    let file = std::fs::File::open(path)?;
+    decode_audio(BufReader::new(file), &path.display().to_string())
+}
+
 /// Decode audio bytes (in-memory) to mono 16 kHz f32 samples.
-pub fn decode_audio_bytes(data: &[u8]) -> anyhow::Result<Vec<f32>> {
-    let cursor = std::io::Cursor::new(data.to_vec());
-    let decoder = Decoder::new(cursor)?;
-
-    let resampled = UniformSourceIterator::<Decoder<std::io::Cursor<Vec<u8>>>>::new(
-        decoder,
-        1,
-        TARGET_SAMPLE_RATE,
-    );
-
-    let samples: Vec<f32> = resampled.collect();
-    anyhow::ensure!(!samples.is_empty(), "no audio samples decoded");
-
-    tracing::info!(
-        "decoded audio bytes: {:.1}s, {} samples",
-        samples.len() as f64 / TARGET_SAMPLE_RATE as f64,
-        samples.len()
-    );
-
-    Ok(samples)
+/// Takes ownership to avoid an extra copy.
+pub fn decode_audio_bytes(data: Vec<u8>) -> anyhow::Result<Vec<f32>> {
+    decode_audio(std::io::Cursor::new(data), "upload")
 }
 
 pub fn preprocess_audio(samples: &mut Vec<f32>, sample_rate: u32) {
@@ -149,7 +134,9 @@ fn trim_silence(samples: &mut Vec<f32>, sample_rate: u32) {
         return;
     }
 
-    *samples = samples[start..end].to_vec();
+    // Trim in-place: shift data and truncate instead of allocating a new Vec
+    samples.copy_within(start..end, 0);
+    samples.truncate(end - start);
 }
 
 fn frame_rms_val(frame: &[f32]) -> f32 {
@@ -160,20 +147,18 @@ fn frame_rms_val(frame: &[f32]) -> f32 {
     (energy / frame.len() as f32).sqrt()
 }
 
-fn normalize_peak(samples: &mut [f32]) -> f32 {
+fn normalize_peak(samples: &mut [f32]) {
     let peak = samples.iter().copied().map(f32::abs).fold(0.0f32, f32::max);
     if !(NORMALIZE_MIN_PEAK..NORMALIZE_TARGET_PEAK).contains(&peak) {
-        return 1.0;
+        return;
     }
 
     let gain = (NORMALIZE_TARGET_PEAK / peak).min(NORMALIZE_MAX_GAIN);
     if gain <= 1.0 {
-        return 1.0;
+        return;
     }
 
     for sample in samples {
         *sample = (*sample * gain).clamp(-1.0, 1.0);
     }
-
-    gain
 }

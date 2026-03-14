@@ -57,11 +57,12 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Serve { config: config_path } => {
-            let config = if config_path.exists() {
-                config::Config::load(&config_path)?
-            } else {
-                tracing::warn!("config file not found at {}, using defaults", config_path.display());
-                config::Config::default()
+            let config = match config::Config::load(&config_path) {
+                Ok(c) => c,
+                Err(_) => {
+                    tracing::warn!("config not found at {}, using defaults", config_path.display());
+                    config::Config::default()
+                }
             };
             server::run(config).await?;
         }
@@ -78,23 +79,18 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Speak { text, voice, output } => {
             let tts_config = config::TtsConfig {
-                default_voice: voice,
+                default_voice: voice.clone(),
                 ..Default::default()
             };
-            // For CLI mode, run synthesis directly without spawning worker
             let tts_tx = tts::spawn_worker(&tts_config)?;
             let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            let voice_selection = if let Some(profile) = tts_config.default_voice.strip_prefix("profile:") {
-                speakers_core::protocol::VoiceSelection::profile(profile)
-            } else {
-                speakers_core::protocol::VoiceSelection::preset(&tts_config.default_voice)
-            };
+            let voice_selection = tts::routes::parse_voice(&voice, &tts_config.default_voice);
             tts_tx.send(tts::routes::TtsJob {
                 text,
                 voice: voice_selection,
                 language: "en".to_string(),
                 reply: reply_tx,
-            })?;
+            }).await?;
             let wav_bytes = reply_rx.await??;
             std::fs::write(&output, &wav_bytes)?;
             println!("wrote {}", output.display());

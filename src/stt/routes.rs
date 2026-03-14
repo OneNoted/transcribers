@@ -6,9 +6,10 @@ use serde::Serialize;
 use tokio::sync::oneshot;
 
 use super::audio::{TARGET_SAMPLE_RATE, decode_audio_bytes, preprocess_audio};
-#[allow(unused_imports)]
-use super::whisper::TranscriptSegment;
 use crate::server::AppState;
+
+/// Maximum upload size: 50 MB
+const MAX_UPLOAD_BYTES: usize = 50 * 1024 * 1024;
 
 #[derive(Debug)]
 pub struct SttJob {
@@ -17,30 +18,18 @@ pub struct SttJob {
     pub reply: oneshot::Sender<anyhow::Result<SttResult>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SttResult {
     pub text: String,
     pub language: Option<String>,
-    pub segments: Vec<super::whisper::TranscriptSegment>,
+    pub segments: Vec<Segment>,
 }
 
-#[derive(Serialize)]
-struct TranscriptionResponse {
-    text: String,
-}
-
-#[derive(Serialize)]
-struct VerboseTranscriptionResponse {
-    text: String,
-    language: Option<String>,
-    segments: Vec<VerboseSegment>,
-}
-
-#[derive(Serialize)]
-struct VerboseSegment {
-    text: String,
-    start: f64,
-    end: f64,
+#[derive(Debug, Clone, Serialize)]
+pub struct Segment {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
 }
 
 pub async fn transcribe(
@@ -48,8 +37,7 @@ pub async fn transcribe(
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let mut audio_data: Option<Vec<u8>> = None;
-    let mut response_format = "json".to_string();
-    let mut language: Option<String> = None;
+    let mut response_format = ResponseFormat::Json;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
@@ -58,28 +46,38 @@ pub async fn transcribe(
                 let bytes = field.bytes().await.map_err(|e| {
                     (StatusCode::BAD_REQUEST, format!("failed to read file: {e}"))
                 })?;
+                if bytes.len() > MAX_UPLOAD_BYTES {
+                    return Err((
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        format!("file exceeds {MAX_UPLOAD_BYTES} byte limit"),
+                    ));
+                }
                 audio_data = Some(bytes.to_vec());
             }
             "response_format" => {
                 if let Ok(text) = field.text().await {
-                    response_format = text;
+                    response_format = match text.as_str() {
+                        "verbose_json" => ResponseFormat::VerboseJson,
+                        "text" => ResponseFormat::Text,
+                        _ => ResponseFormat::Json,
+                    };
                 }
             }
-            "language" => {
-                if let Ok(text) = field.text().await {
-                    language = Some(text);
-                }
-            }
-            _ => {} // Ignore model and other fields
+            _ => {} // Ignore model, language, prompt, and other fields
         }
     }
 
     let audio_data = audio_data.ok_or((StatusCode::BAD_REQUEST, "missing 'file' field".to_string()))?;
 
-    let mut samples = decode_audio_bytes(&audio_data)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("failed to decode audio: {e}")))?;
-
-    preprocess_audio(&mut samples, TARGET_SAMPLE_RATE);
+    // Offload CPU-intensive decode + preprocessing to a blocking thread
+    let samples = tokio::task::spawn_blocking(move || {
+        let mut samples = decode_audio_bytes(audio_data)?;
+        preprocess_audio(&mut samples, TARGET_SAMPLE_RATE);
+        Ok::<_, anyhow::Error>(samples)
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("decode task panicked: {e}")))?
+    .map_err(|e| (StatusCode::BAD_REQUEST, format!("failed to decode audio: {e}")))?;
 
     let (tx, rx) = oneshot::channel();
     let job = SttJob {
@@ -88,10 +86,7 @@ pub async fn transcribe(
         reply: tx,
     };
 
-    // Override language if provided in request
-    let _ = language; // TODO: per-request language override
-
-    state.stt_tx.send(job).map_err(|_| {
+    state.stt_tx.send(job).await.map_err(|_| {
         (StatusCode::SERVICE_UNAVAILABLE, "STT engine unavailable".to_string())
     })?;
 
@@ -101,21 +96,23 @@ pub async fn transcribe(
         (StatusCode::INTERNAL_SERVER_ERROR, format!("transcription failed: {e}"))
     })?;
 
-    match response_format.as_str() {
-        "verbose_json" => {
-            Ok(Json(serde_json::to_value(VerboseTranscriptionResponse {
-                text: result.text,
-                language: result.language,
-                segments: result.segments.into_iter().map(|s| VerboseSegment {
-                    text: s.text,
-                    start: s.start,
-                    end: s.end,
-                }).collect(),
-            }).unwrap()).into_response())
+    match response_format {
+        ResponseFormat::VerboseJson => {
+            Ok(Json(serde_json::json!({
+                "text": result.text,
+                "language": result.language,
+                "segments": result.segments,
+            })).into_response())
         }
-        "text" => Ok(result.text.into_response()),
-        _ => {
-            Ok(Json(TranscriptionResponse { text: result.text }).into_response())
+        ResponseFormat::Text => Ok(result.text.into_response()),
+        ResponseFormat::Json => {
+            Ok(Json(serde_json::json!({ "text": result.text })).into_response())
         }
     }
+}
+
+enum ResponseFormat {
+    Json,
+    VerboseJson,
+    Text,
 }

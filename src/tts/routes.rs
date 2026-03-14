@@ -9,6 +9,9 @@ use tokio::sync::oneshot;
 
 use crate::server::AppState;
 
+/// Maximum TTS input text length (characters).
+const MAX_INPUT_LEN: usize = 4096;
+
 #[derive(Debug)]
 pub struct TtsJob {
     pub text: String,
@@ -22,26 +25,26 @@ pub struct SpeechRequest {
     pub input: String,
     #[serde(default = "default_voice")]
     pub voice: String,
-    #[serde(default = "default_format")]
-    #[allow(dead_code)]
-    pub response_format: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub model: Option<String>,
 }
 
 fn default_voice() -> String {
     "ryan".to_string()
 }
 
-fn default_format() -> String {
-    "wav".to_string()
-}
-
 pub async fn speech(
     State(state): State<AppState>,
     Json(req): Json<SpeechRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    if req.input.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "input text is empty".to_string()));
+    }
+    if req.input.len() > MAX_INPUT_LEN {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("input exceeds {MAX_INPUT_LEN} character limit"),
+        ));
+    }
+
     let voice = parse_voice(&req.voice, &state.default_voice);
     let language = "en".to_string();
 
@@ -53,7 +56,7 @@ pub async fn speech(
         reply: tx,
     };
 
-    state.tts_tx.send(job).map_err(|_| {
+    state.tts_tx.send(job).await.map_err(|_| {
         (StatusCode::SERVICE_UNAVAILABLE, "TTS engine unavailable".to_string())
     })?;
 
@@ -69,7 +72,9 @@ pub async fn speech(
     ))
 }
 
-fn parse_voice(voice_str: &str, default: &str) -> VoiceSelection {
+/// Parse a voice string into a `VoiceSelection`.
+/// Supports "profile:NAME" for cloned voices, otherwise treats as a preset.
+pub fn parse_voice(voice_str: &str, default: &str) -> VoiceSelection {
     let voice_str = if voice_str.is_empty() { default } else { voice_str };
 
     if let Some(profile_name) = voice_str.strip_prefix("profile:") {

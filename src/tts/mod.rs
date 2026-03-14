@@ -1,6 +1,5 @@
 pub mod routes;
 
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -10,11 +9,12 @@ use speakers_core::lang;
 use speakers_core::model::ModelVariant;
 use speakers_core::profile::{self, ProfileMode};
 use speakers_core::protocol::VoiceSelection;
+use tokio::sync::mpsc;
 
 use crate::config::TtsConfig;
 use routes::TtsJob;
 
-pub fn spawn_worker(config: &TtsConfig) -> anyhow::Result<mpsc::SyncSender<TtsJob>> {
+pub fn spawn_worker(config: &TtsConfig) -> anyhow::Result<mpsc::Sender<TtsJob>> {
     let model_variant = match config.model.as_str() {
         "base" => ModelVariant::Base,
         _ => ModelVariant::CustomVoice,
@@ -35,13 +35,13 @@ pub fn spawn_worker(config: &TtsConfig) -> anyhow::Result<mpsc::SyncSender<TtsJo
 
     tracing::info!("TTS model loaded: {:?}, device={device:?}", model_variant);
 
-    let (tx, rx) = mpsc::sync_channel::<TtsJob>(4);
+    let (tx, mut rx) = mpsc::channel::<TtsJob>(4);
 
     std::thread::Builder::new()
         .name("tts-worker".to_string())
         .spawn(move || {
             tracing::info!("TTS worker started");
-            while let Ok(job) = rx.recv() {
+            while let Some(job) = rx.blocking_recv() {
                 let result = synthesize(
                     &model,
                     &device,
@@ -105,26 +105,28 @@ fn synthesize(
         timeout.as_millis()
     );
 
-    // Encode to WAV in memory
+    // Encode to WAV in memory using the AudioBuffer's actual sample rate
+    let sample_rate = audio.sample_rate;
     let spec = hound::WavSpec {
         channels: 1,
-        sample_rate: 24000,
+        sample_rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
 
-    let mut cursor = std::io::Cursor::new(Vec::new());
+    // Pre-allocate: 44-byte WAV header + 2 bytes per i16 sample
+    let estimated_size = 44 + audio.samples.len() * 2;
+    let mut cursor = std::io::Cursor::new(Vec::with_capacity(estimated_size));
     {
         let mut writer = hound::WavWriter::new(&mut cursor, spec)?;
         for &sample in &audio.samples {
             let clamped = sample.clamp(-1.0, 1.0);
-            let i16_val = (clamped * i16::MAX as f32) as i16;
-            writer.write_sample(i16_val)?;
+            writer.write_sample((clamped * i16::MAX as f32) as i16)?;
         }
         writer.finalize()?;
     }
 
-    let duration_secs = audio.samples.len() as f64 / 24000.0;
+    let duration_secs = audio.samples.len() as f64 / sample_rate as f64;
     tracing::info!(
         "synthesized {:.1}s audio in {:.1}s (RTF {:.2})",
         duration_secs,
