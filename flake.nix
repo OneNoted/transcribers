@@ -31,6 +31,14 @@
 
           src = craneLib.cleanCargoSource ./.;
 
+          cudaDeps = with pkgs.cudaPackages; [
+            cuda_cudart
+            cuda_nvcc
+            libcublas
+            cuda_cccl
+            cuda_cudart.static
+          ];
+
           commonArgs = {
             inherit src;
 
@@ -38,18 +46,11 @@
               pkg-config
               cmake
               clang
-            ] ++ pkgs.lib.optionals withCuda [
-              pkgs.cudaPackages.cuda_nvcc
-            ];
+            ] ++ pkgs.lib.optionals withCuda cudaDeps;
 
             buildInputs = with pkgs; [
               openssl
-            ] ++ pkgs.lib.optionals withCuda (with pkgs.cudaPackages; [
-              cuda_cudart
-              cuda_nvcc
-              libcublas
-              cuda_cccl
-            ]);
+            ] ++ pkgs.lib.optionals withCuda cudaDeps;
 
             cargoExtraArgs = if withCuda
               then "--features cuda"
@@ -58,6 +59,8 @@
             env = pkgs.lib.optionalAttrs withCuda {
               WHISPER_CUBLAS = "1";
               CUDA_COMPUTE_CAP = "89";
+              CUDA_ROOT = "${pkgs.cudaPackages.cuda_nvcc}";
+              CUDA_PATH = "${pkgs.cudaPackages.cuda_nvcc}";
             };
           };
 
