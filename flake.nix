@@ -65,7 +65,7 @@
             env = {
               LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
             } // pkgs.lib.optionalAttrs withCuda {
-              WHISPER_CUBLAS = "1";
+              WHISPER_CUDA = "1";
               CUDA_COMPUTE_CAP = "89";
               CUDA_ROOT = "${cudaJoined}";
               CUDA_PATH = "${cudaJoined}";
