@@ -38,8 +38,15 @@
             cuda_cccl
           ];
 
+          # bindgen_cuda expects a traditional /usr/local/cuda-style layout
+          cudaJoined = pkgs.symlinkJoin {
+            name = "cuda-toolkit-joined";
+            paths = cudaDeps;
+          };
+
           commonArgs = {
             inherit src;
+            strictDeps = true;
 
             nativeBuildInputs = with pkgs; [
               pkg-config
@@ -58,8 +65,9 @@
             env = pkgs.lib.optionalAttrs withCuda {
               WHISPER_CUBLAS = "1";
               CUDA_COMPUTE_CAP = "89";
-              CUDA_ROOT = "${pkgs.cudaPackages.cuda_nvcc}";
-              CUDA_PATH = "${pkgs.cudaPackages.cuda_nvcc}";
+              CUDA_ROOT = "${cudaJoined}";
+              CUDA_PATH = "${cudaJoined}";
+              CUDA_TOOLKIT_ROOT_DIR = "${cudaJoined}";
             };
           };
 
