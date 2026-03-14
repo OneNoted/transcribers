@@ -52,6 +52,7 @@
               pkg-config
               cmake
               clang
+              git
             ] ++ pkgs.lib.optionals withCuda cudaDeps;
 
             buildInputs = with pkgs; [
