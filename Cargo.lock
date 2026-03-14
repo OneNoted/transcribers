@@ -2440,6 +2440,8 @@ dependencies = [
 [[package]]
 name = "speakers-core"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a0ba819cdf8c108eb1b3bcfecf59d11d68cde4969f9abb9f20c5f6c564033fa"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -2452,6 +2454,8 @@ dependencies = [
 [[package]]
 name = "speakers-qwen3-tts"
 version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a78db2ae368954fcc904f4c95001306f9cb002c4920cc3e731d2fee77f836271"
 dependencies = [
  "anyhow",
  "audioadapter-buffers",
